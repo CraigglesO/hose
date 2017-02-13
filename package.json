@@ -1,10 +1,10 @@
 {
   "name": "hose",
-  "version": "0.0.0",
-  "description": "DESCRIPTION_GOES_HERE",
+  "version": "0.6.0",
+  "description": "A stream ready wire for the Bittorrent Protocol",
   "main": "./out/hose.js",
   "scripts": {
-    "test": "echo running server tests... && cd test && ts-node ../node_modules/blue-tape/bin/blue-tape \"**/*.ts\" | tap-spec",
+    "test": "echo running server tests... && cd test && DEBUG=\"hose\" ts-node ../node_modules/blue-tape/bin/blue-tape \"**/*.ts\" | tap-spec",
     "start": "npm run build:live",
     "build:live": "nodemon --exec ./node_modules/.bin/ts-node -- ./hose.ts",
     "build": "echo building... && typings bundle -o out/hose.d.ts",
@@ -37,6 +37,8 @@
     "typings": "^2.1.0"
   },
   "dependencies": {
+    "bencode": "^0.11.0",
+    "speedometer": "^1.0.0",
     "ut-extensions": "^1.2.0"
   }
 }

@@ -2,7 +2,7 @@
   "name": "hose",
   "main": "hose.d.ts",
   "homepage": "",
-  "version": "0.0.0",
+  "version": "0.6.0",
   "globalDevDependencies": {
     "node": "registry:env/node#6.0.0+20170119204930"
   },

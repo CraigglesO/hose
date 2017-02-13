@@ -1,4 +1,3 @@
-import I = require("./hose");
+import Hose = require("./hose");
 
-  export = I;
-  
+export = Hose;

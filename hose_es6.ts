@@ -99,70 +99,67 @@ function Hose(infoHash: string, peerID: string, options?: Options) {
 
 
 // HANDSHAKE:
-Hose.prototype.prepHandshake = function () {
-  const self = this;
-  self._nextAction(1, (payload) => {
+Hose.prototype.prepHandshake = () => {
+  this._nextAction(1, (payload) => {
     let pstrlen = payload.readUInt8(0);
-    self._nextAction(pstrlen + 48, (payload) => {
+    this._nextAction(pstrlen + 48, (payload) => {
       // Prepare all information
-      self._debug("prepHandshake Engaged");
+      this._debug("prepHandshake Engaged");
       let pstr          = payload.slice(0, pstrlen),   // Protocol Identifier utf-8 encoding
           reserved      = payload.slice(pstrlen, 8);   // These 8 bytes are reserved for future use
           pstr          = pstr.toString();             // Convert the Protocol to a string
           payload       = payload.slice(pstrlen + 8);  // Remove the pre-string and reserved bytes from buffer
       let infoHash      = payload.slice(0, 20),
           peerID        = payload.slice(20, 40);
-          self.infoHash = infoHash.toString("hex");    // Infohash is a hex string
-          self.peerID   = peerID.toString();           // PeerID is also a hex string
+          this.infoHash = infoHash.toString("hex");    // Infohash is a hex string
+          this.peerID   = peerID.toString();           // PeerID is also a hex string
 
       if (pstr !== "BitTorrent protocol")
         return;
 
       // Send a handshake back if peer initiated the connection
-      self._debug(`infoHash: ${self.infoHash}, peerID: ${self.peerID}`);
-      if (!self.sentHandshake)
-        self.emit("handshake", infoHash, peerID);      // Let listeners know the peers requested infohash and ID
+      this._debug(`infoHash: ${this.infoHash}, peerID: ${this.peerID}`);
+      if (!this.sentHandshake)
+        this.emit("handshake", this.infoHash, this.peerID);      // Let listeners know the peers requested infohash and ID
 
       // Last but not least let's add a new action to the queue
-      self.nextAction();
+      this.nextAction();
     });
   });
 }
 
-Hose.prototype.nextAction = function() {
-  const self = this;
+Hose.prototype.nextAction = () => {
   // TODO: upate keep alive timer here.
-  self._nextAction(4, (payload) => {
+  this._nextAction(4, (payload) => {
     let length = payload.readUInt32BE(0);          // Get the length of the payload.
     if (length > 0)
-      self._nextAction(length, self.handleCode.bind(self));      // Message length, next action is to parse the information provided
+      this._nextAction(length, this.handleCode);      // Message length, next action is to parse the information provided
     else
-      self.nextAction();
+      this.nextAction();
   });
 }
 
 /** All built in functionality goes here: **/
 
 // Read streams will all be handled with this.push
-Hose.prototype._read = function() {}
+Hose.prototype._read = () => {}
 /** Handling incoming messages with message length (this.parseSize)
  ** and cueing up commands to handle the message (this.actionStore) **/
-Hose.prototype._write = function(payload: Buffer, encoding: string, next: Function) {
-  const self = this;
-  self._debug(`incoming size:`, payload.length);
-  self.downloadSpeed(payload.length);
-  self.bufferSize += payload.length;             // Increase our buffer size count, we have more data
-  self.streamStore.push(payload);                // Add the payload to our list of streams downloaded
+Hose.prototype._write = (payload: Buffer, encoding: string, next: Function) => {
+  this._debug(`incoming size:`, payload.length);
+  this.downloadSpeed(payload.length);
+  this.bufferSize += payload.length;             // Increase our buffer size count, we have more data
+  this.streamStore.push(payload);                // Add the payload to our list of streams downloaded
   // Parse Size is always pre-recorded, because we know what to expect from peers
-  while (self.bufferSize >= self.parseSize) {    // Wait until the package size fits the crime
-    let buf = (self.streamStore.length > 1)      // Store our stream to a buffer to do the crime
-      ? Buffer.concat(self.streamStore)
-      : self.streamStore[0];
-    self.bufferSize -= self.parseSize;           // Decrease the size of our store count, self number of data is processed
-    self.streamStore = (self.bufferSize)         // If buffersize is zero, reset the buffer; otherwise just slice the part we are going to use
-      ? [buf.slice(self.parseSize)]
+  while (this.bufferSize >= this.parseSize) {    // Wait until the package size fits the crime
+    let buf = (this.streamStore.length > 1)      // Store our stream to a buffer to do the crime
+      ? Buffer.concat(this.streamStore)
+      : this.streamStore[0];
+    this.bufferSize -= this.parseSize;           // Decrease the size of our store count, this number of data is processed
+    this.streamStore = (this.bufferSize)         // If buffersize is zero, reset the buffer; otherwise just slice the part we are going to use
+      ? [buf.slice(this.parseSize)]
       : [];
-    self.actionStore(buf.slice(0, self.parseSize));  // Let us run the code we have!
+    this.actionStore(buf.slice(0, this.parseSize));  // Let us run the code we have!
   }
   // send a null to let stream know we are done and ready for the next input.
   // next(null);
@@ -170,16 +167,16 @@ Hose.prototype._write = function(payload: Buffer, encoding: string, next: Functi
 
 /** ALL OUTGOING GOES HERE:  **/
 
-Hose.prototype._push = function(payload: Buffer) {
+Hose.prototype._push = (payload: Buffer) => {
   // TODO: upate keep alive timer here.
   return this.push(payload);
 }
 // keep-alive: <len=0000>
-Hose.prototype.sendKeepActive = function() {
+Hose.prototype.sendKeepActive = () => {
   this._push(KEEP_ALIVE);
 }
 // handshake: <pstrlen><pstr><reserved><info_hash><peer_id>
-Hose.prototype.sendHandshake = function() {
+Hose.prototype.sendHandshake = () => {
   // TODO: check if infohash and peerID are already buffers
   this.sentHandshake = true;
   // convert infoHash and peerID to buffer
@@ -188,20 +185,20 @@ Hose.prototype.sendHandshake = function() {
   this._push(Buffer.concat([PROTOCOL, RESERVED, infoHashBuffer, peerIDbuffer]));
 }
 // not interested: <len=0001><id=3>
-Hose.prototype.sendNotInterested = function() {
+Hose.prototype.sendNotInterested = () => {
   this._push(UNINTERESTED);
 }
 // interested: <len=0001><id=2>
-Hose.prototype.sendInterested = function() {
+Hose.prototype.sendInterested = () => {
   this._push(Buffer.concat([INTERESTED, UNCHOKE]));
   this.choked = false;
 }
 // have: <len=0005><id=4><piece index>
-Hose.prototype.sendHave = function(index: number) {
+Hose.prototype.sendHave = (index: number) => {
   // TODO: Superseeding
 }
 // bitfield: <len=0001+X><id=5><bitfield>
-Hose.prototype.sendBitfield = function(bitfield: string) {
+Hose.prototype.sendBitfield = (bitfield: string) => {
   // update bitfield length param to bitfield size:
   let bitfieldBuf = Buffer.from(bitfield, "hex");
   let bf = BITFIELD;
@@ -209,7 +206,7 @@ Hose.prototype.sendBitfield = function(bitfield: string) {
   this._push( Buffer.concat([bf, bitfieldBuf]) );
 }
 // request: <len=0013><id=6><index><begin><length>
-Hose.prototype.sendRequest = function(payload: Buffer, count: number) {
+Hose.prototype.sendRequest = (payload: Buffer, count: number) => {
   const self      = this;
   // Track how many incoming we are going to get:
   self.blockCount = count;
@@ -219,37 +216,37 @@ Hose.prototype.sendRequest = function(payload: Buffer, count: number) {
   this._push(payload);
 }
 // piece: <len=0009+X><id=7><index><begin><block>
-Hose.prototype.sendPiece = function(piece: Buffer) {
+Hose.prototype.sendPiece = (piece: Buffer) => {
   this._push(piece);
 }
 // cancel: <len=0013><id=8><index><begin><length>
-Hose.prototype.sendCancel = function() {
+Hose.prototype.sendCancel = () => {
 
 }
 
 /** ALL INCOMING GOES HERE: **/
 
-Hose.prototype._nextAction = function(length: number, action: Function) {
+Hose.prototype._nextAction = (length: number, action: Function) => {
   this.parseSize   = length;
   this.actionStore = action;
 }
 // have: <len=0005><id=4><piece index>
-Hose.prototype._onHave = function(pieceIndex) {
+Hose.prototype._onHave = (pieceIndex) => {
   this.emit("have", pieceIndex);
 }
 // bitfield: <len=0001+X><id=5><bitfield>
-Hose.prototype._onBitfield = function(payload) {
+Hose.prototype._onBitfield = (payload) => {
   // Here we have recieved a bitfield (first message)
   this.emit("bitfield", payload);
 }
 // request: <len=0013><id=6><index><begin><length>
-Hose.prototype._onRequest = function(index, begin, length) {
+Hose.prototype._onRequest = (index, begin, length) => {
   // Add the request to the stack:
   this.inRequests.push({index, begin, length});
   this.emit("request");
 }
 // piece: <len=0009+X><id=7><index><begin><block>
-Hose.prototype._onPiece = function(index: number, begin: number, block: Buffer) {
+Hose.prototype._onPiece = (index: number, begin: number, block: Buffer) => {
   const self = this;
   process.nextTick(() => {
     self.blockCount--;
@@ -267,14 +264,14 @@ Hose.prototype._onPiece = function(index: number, begin: number, block: Buffer) 
   });
 }
 // cancel: <len=0013><id=8><index><begin><length>
-Hose.prototype._onCancel = function(index, begin, length) {
+Hose.prototype._onCancel = (index, begin, length) => {
 
 }
 
 /** ALL EXTENSIONS GO HERE **/
 
 // extension: <len=0002+x><id=20><extID><payload>
-Hose.prototype._onExtension = function(extensionID: number, payload: Buffer) {
+Hose.prototype._onExtension = (extensionID: number, payload: Buffer) => {
   const self = this;
   if (extensionID === 0) {
     // Handle the extension handshake:
@@ -330,7 +327,7 @@ Hose.prototype._onExtension = function(extensionID: number, payload: Buffer) {
 }
 
 // All metadata requests:
-Hose.prototype.metaDataRequest = function() {
+Hose.prototype.metaDataRequest = () => {
   const self = this;
   if (self.ext["ut_metadata"]) {
     self.metaDataHandshake();
@@ -347,7 +344,7 @@ Hose.prototype.metaDataRequest = function() {
   }
 }
 
-Hose.prototype.metaDataHandshake = function() {
+Hose.prototype.metaDataHandshake = () => {
   // Prep and send a meta_data handshake:
   let handshake     = EXT_PROTOCOL,
       prepHandshake = EXTENDED,
@@ -359,7 +356,7 @@ Hose.prototype.metaDataHandshake = function() {
 
 /** HANDLE INCOMING MESSAGES HERE: **/
 
-Hose.prototype.handleCode = function(payload: Buffer) {
+Hose.prototype.handleCode = (payload: Buffer) => {
   const self = this;
   self.nextAction();     // Prep for the next nextAction
   switch (payload[0]) {
@@ -427,39 +424,39 @@ Hose.prototype.handleCode = function(payload: Buffer) {
 
 /** Commands to & from torrentEngine **/
 
-Hose.prototype.isChoked = function(): Boolean {
+Hose.prototype.isChoked = (): Boolean => {
   return this.choked;
 }
 
-Hose.prototype.isBusy = function(): Boolean {
+Hose.prototype.isBusy = (): Boolean  => {
   return this.busy;
 }
 
-Hose.prototype.setBusy = function() {
+Hose.prototype.setBusy = () => {
   this.busy = true;
 }
 
-Hose.prototype.unsetBusy = function() {
+Hose.prototype.unsetBusy = () => {
   this.busy = false;
 }
 
-Hose.prototype.closeConnection = function() {
+Hose.prototype.closeConnection = () => {
   this.isActive = false;
   this.emit("close");
 }
 
-Hose.prototype.removeMeta = function() {
+Hose.prototype.removeMeta = () => {
   this.meta = false;
   this.ext[ UT_METADATA ] = null;
   delete this.ext[ UT_METADATA ];
 }
 
-Hose.prototype.close = function() {
+Hose.prototype.close = () => {
   // TODO: remove timeouts
 
 }
 
-Hose.prototype._debug = function(...args: any[]) {
+Hose.prototype._debug = (...args: any[]) => {
   args[0] = "[" + this._debugId + "] " + args[0];
   debug.apply(null, args);
 };

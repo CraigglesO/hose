@@ -35,108 +35,105 @@ function Hose(infoHash, peerID, options) {
     self.ext = {};
     self.prepHandshake();
 }
-Hose.prototype.prepHandshake = function () {
-    const self = this;
-    self._nextAction(1, (payload) => {
+Hose.prototype.prepHandshake = () => {
+    this._nextAction(1, (payload) => {
         let pstrlen = payload.readUInt8(0);
-        self._nextAction(pstrlen + 48, (payload) => {
-            self._debug("prepHandshake Engaged");
+        this._nextAction(pstrlen + 48, (payload) => {
+            this._debug("prepHandshake Engaged");
             let pstr = payload.slice(0, pstrlen), reserved = payload.slice(pstrlen, 8);
             pstr = pstr.toString();
             payload = payload.slice(pstrlen + 8);
             let infoHash = payload.slice(0, 20), peerID = payload.slice(20, 40);
-            self.infoHash = infoHash.toString("hex");
-            self.peerID = peerID.toString();
+            this.infoHash = infoHash.toString("hex");
+            this.peerID = peerID.toString();
             if (pstr !== "BitTorrent protocol")
                 return;
-            self._debug(`infoHash: ${self.infoHash}, peerID: ${self.peerID}`);
-            if (!self.sentHandshake)
-                self.emit("handshake", infoHash, peerID);
-            self.nextAction();
+            this._debug(`infoHash: ${this.infoHash}, peerID: ${this.peerID}`);
+            if (!this.sentHandshake)
+                this.emit("handshake", this.infoHash, this.peerID);
+            this.nextAction();
         });
     });
 };
-Hose.prototype.nextAction = function () {
-    const self = this;
-    self._nextAction(4, (payload) => {
+Hose.prototype.nextAction = () => {
+    this._nextAction(4, (payload) => {
         let length = payload.readUInt32BE(0);
         if (length > 0)
-            self._nextAction(length, self.handleCode.bind(self));
+            this._nextAction(length, this.handleCode);
         else
-            self.nextAction();
+            this.nextAction();
     });
 };
-Hose.prototype._read = function () { };
-Hose.prototype._write = function (payload, encoding, next) {
-    const self = this;
-    self._debug(`incoming size:`, payload.length);
-    self.downloadSpeed(payload.length);
-    self.bufferSize += payload.length;
-    self.streamStore.push(payload);
-    while (self.bufferSize >= self.parseSize) {
-        let buf = (self.streamStore.length > 1)
-            ? buffer_1.Buffer.concat(self.streamStore)
-            : self.streamStore[0];
-        self.bufferSize -= self.parseSize;
-        self.streamStore = (self.bufferSize)
-            ? [buf.slice(self.parseSize)]
+Hose.prototype._read = () => { };
+Hose.prototype._write = (payload, encoding, next) => {
+    this._debug(`incoming size:`, payload.length);
+    this.downloadSpeed(payload.length);
+    this.bufferSize += payload.length;
+    this.streamStore.push(payload);
+    while (this.bufferSize >= this.parseSize) {
+        let buf = (this.streamStore.length > 1)
+            ? buffer_1.Buffer.concat(this.streamStore)
+            : this.streamStore[0];
+        this.bufferSize -= this.parseSize;
+        this.streamStore = (this.bufferSize)
+            ? [buf.slice(this.parseSize)]
             : [];
-        self.actionStore(buf.slice(0, self.parseSize));
+        this.actionStore(buf.slice(0, this.parseSize));
     }
 };
-Hose.prototype._push = function (payload) {
+Hose.prototype._push = (payload) => {
     return this.push(payload);
 };
-Hose.prototype.sendKeepActive = function () {
+Hose.prototype.sendKeepActive = () => {
     this._push(KEEP_ALIVE);
 };
-Hose.prototype.sendHandshake = function () {
+Hose.prototype.sendHandshake = () => {
     this.sentHandshake = true;
     let infoHashBuffer = buffer_1.Buffer.from(this.infoHash, "hex"), peerIDbuffer = buffer_1.Buffer.from(this.peerID);
     this._push(buffer_1.Buffer.concat([PROTOCOL, RESERVED, infoHashBuffer, peerIDbuffer]));
 };
-Hose.prototype.sendNotInterested = function () {
+Hose.prototype.sendNotInterested = () => {
     this._push(UNINTERESTED);
 };
-Hose.prototype.sendInterested = function () {
+Hose.prototype.sendInterested = () => {
     this._push(buffer_1.Buffer.concat([INTERESTED, UNCHOKE]));
     this.choked = false;
 };
-Hose.prototype.sendHave = function (index) {
+Hose.prototype.sendHave = (index) => {
 };
-Hose.prototype.sendBitfield = function (bitfield) {
+Hose.prototype.sendBitfield = (bitfield) => {
     let bitfieldBuf = buffer_1.Buffer.from(bitfield, "hex");
     let bf = BITFIELD;
     bf.writeUInt32BE(bitfieldBuf.length + 1, 0);
     this._push(buffer_1.Buffer.concat([bf, bitfieldBuf]));
 };
-Hose.prototype.sendRequest = function (payload, count) {
+Hose.prototype.sendRequest = (payload, count) => {
     const self = this;
     self.blockCount = count;
     self.busy = true;
     self.pieceHash = crypto_1.createHash("sha1");
     this._push(payload);
 };
-Hose.prototype.sendPiece = function (piece) {
+Hose.prototype.sendPiece = (piece) => {
     this._push(piece);
 };
-Hose.prototype.sendCancel = function () {
+Hose.prototype.sendCancel = () => {
 };
-Hose.prototype._nextAction = function (length, action) {
+Hose.prototype._nextAction = (length, action) => {
     this.parseSize = length;
     this.actionStore = action;
 };
-Hose.prototype._onHave = function (pieceIndex) {
+Hose.prototype._onHave = (pieceIndex) => {
     this.emit("have", pieceIndex);
 };
-Hose.prototype._onBitfield = function (payload) {
+Hose.prototype._onBitfield = (payload) => {
     this.emit("bitfield", payload);
 };
-Hose.prototype._onRequest = function (index, begin, length) {
+Hose.prototype._onRequest = (index, begin, length) => {
     this.inRequests.push({ index, begin, length });
     this.emit("request");
 };
-Hose.prototype._onPiece = function (index, begin, block) {
+Hose.prototype._onPiece = (index, begin, block) => {
     const self = this;
     process.nextTick(() => {
         self.blockCount--;
@@ -149,9 +146,9 @@ Hose.prototype._onPiece = function (index, begin, block) {
         }
     });
 };
-Hose.prototype._onCancel = function (index, begin, length) {
+Hose.prototype._onCancel = (index, begin, length) => {
 };
-Hose.prototype._onExtension = function (extensionID, payload) {
+Hose.prototype._onExtension = (extensionID, payload) => {
     const self = this;
     if (extensionID === 0) {
         let obj = bencode.decode(payload);
@@ -192,7 +189,7 @@ Hose.prototype._onExtension = function (extensionID, payload) {
             self.ext[extensionID]._message(payload);
     }
 };
-Hose.prototype.metaDataRequest = function () {
+Hose.prototype.metaDataRequest = () => {
     const self = this;
     if (self.ext["ut_metadata"]) {
         self.metaDataHandshake();
@@ -204,13 +201,13 @@ Hose.prototype.metaDataRequest = function () {
         this._push(requestBuf);
     }
 };
-Hose.prototype.metaDataHandshake = function () {
+Hose.prototype.metaDataHandshake = () => {
     let handshake = EXT_PROTOCOL, prepHandshake = EXTENDED, handshakeEn = bencode.encode(handshake);
     prepHandshake.writeUInt32BE(handshakeEn.length + 2, 0);
     let handshakeBuf = buffer_1.Buffer.concat([prepHandshake, buffer_1.Buffer.from([0x00]), handshakeEn]);
     this._push(handshakeBuf);
 };
-Hose.prototype.handleCode = function (payload) {
+Hose.prototype.handleCode = (payload) => {
     const self = this;
     self.nextAction();
     switch (payload[0]) {
@@ -267,30 +264,30 @@ Hose.prototype.handleCode = function (payload) {
             this._debug("error, wrong message");
     }
 };
-Hose.prototype.isChoked = function () {
+Hose.prototype.isChoked = () => {
     return this.choked;
 };
-Hose.prototype.isBusy = function () {
+Hose.prototype.isBusy = () => {
     return this.busy;
 };
-Hose.prototype.setBusy = function () {
+Hose.prototype.setBusy = () => {
     this.busy = true;
 };
-Hose.prototype.unsetBusy = function () {
+Hose.prototype.unsetBusy = () => {
     this.busy = false;
 };
-Hose.prototype.closeConnection = function () {
+Hose.prototype.closeConnection = () => {
     this.isActive = false;
     this.emit("close");
 };
-Hose.prototype.removeMeta = function () {
+Hose.prototype.removeMeta = () => {
     this.meta = false;
     this.ext[UT_METADATA] = null;
     delete this.ext[UT_METADATA];
 };
-Hose.prototype.close = function () {
+Hose.prototype.close = () => {
 };
-Hose.prototype._debug = function (...args) {
+Hose.prototype._debug = (...args) => {
     args[0] = "[" + this._debugId + "] " + args[0];
     debug.apply(null, args);
 };
