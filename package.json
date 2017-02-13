@@ -1,5 +1,5 @@
 {
-  "name": "hose",
+  "name": "bittorrent-wire",
   "version": "0.6.0",
   "description": "A stream ready wire for the Bittorrent Protocol",
   "main": "./out/hose.js",
@@ -26,19 +26,22 @@
   "license": "ISC",
   "devDependencies": {
     "@types/node": "^7.0.0",
+    "binary-bitfield": "^3.12.9",
     "blue-tape": "^1.0.0",
-    "tap-spec": "^4.1.1",
     "nodemon": "^1.11.0",
+    "onchange": "^3.2.1",
+    "tap-spec": "^4.1.1",
+    "torrent-piece-handler": "^3.16.41",
     "ts-node": "^2.0.0",
-    "typescript": "^2.1.5",
     "tslint": "^4.3.1",
     "tslint-config-typings": "^0.3.1",
-    "onchange": "^3.2.1",
+    "typescript": "^2.1.5",
     "typings": "^2.1.0"
   },
   "dependencies": {
     "bencode": "^0.11.0",
     "speedometer": "^1.0.0",
+    "string2compact": "^1.2.2",
     "ut-extensions": "^1.2.0"
   }
 }

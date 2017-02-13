@@ -1,10 +1,10 @@
 "use strict";
 
-/**
+/***********************************************************
  * Sources:
  * https://wiki.theory.org/BitTorrentSpecification#Handshake
  * http://www.bittorrent.org/beps/bep_0003.html
- */
+ ***********************************************************/
 
 import { Duplex } from "stream";
 import * as inherits from "inherits";
@@ -30,13 +30,13 @@ const PROTOCOL     = Buffer.from("BitTorrent protocol"),
       UNCHOKE      = Buffer.from([0x00, 0x00, 0x00, 0x01, 0x01]), // unchoke: <len=0001><id=1>
       INTERESTED   = Buffer.from([0x00, 0x00, 0x00, 0x01, 0x02]), // <len=0001><id=2>
       UNINTERESTED = Buffer.from([0x00, 0x00, 0x00, 0x01, 0x03]), // <len=0001><id=3>
-      HAVE         = Buffer.from([0x00, 0x00, 0x00, 0x01, 0x04]), // <len=0005><id=4><piece index>
+      HAVE         = Buffer.from([0x00, 0x00, 0x00, 0x05, 0x04]), // <len=0005><id=4><piece index>
       BITFIELD     = Buffer.from([0x00, 0x00, 0x00, 0x01, 0x05]), // <len=0001+X><id=5><bitfield>
       REQUEST      = Buffer.from([0x00, 0x00, 0x00, 0x0d, 0x06]), // <len=0013><id=6><index><begin><length> Requests are 1 code and 3 32 bit integers
       PIECE        = Buffer.from([0x00, 0x00, 0x00, 0x09, 0x07]), // <len=0009+X><id=7><index><begin><block> Pieces are 1 code and 2 16 bit integers and then the piece...
-      CANCEL       = Buffer.from([0x00, 0x00, 0x00, 0x01, 0x08]), // <len=0013><id=8><index><begin><length>
+      CANCEL       = Buffer.from([0x00, 0x00, 0x00, 0x0d, 0x08]), // <len=0013><id=8><index><begin><length>
       PORT         = Buffer.from([0x00, 0x00, 0x00, 0x03, 0x09]), // <len=0003><id=9><listen-port>
-      EXTENDED     = Buffer.from([0x00, 0x00, 0x00, 0x01, 0x14]),
+      EXTENDED     = Buffer.from([0x00, 0x00, 0x00, 0x01, 0x14]), // <len=0002+X><id=20><ext_id><ext_msg>
       EXT_PROTOCOL = { "m": {"ut_pex": 1, "ut_metadata": 2} },
       UT_PEX       = 1,
       UT_METADATA  = 2;
@@ -53,26 +53,33 @@ interface Request {
 }
 
 interface Options {
-  "allowHalfOpen":      boolean;
-  "readableObjectMode": boolean;
-  "writableObjectMode": boolean;
+  "metadata_handshake": MetadataHandshake;
+}
+
+interface MetadataHandshake {
+  "ipv4":          Buffer;
+  "ipv6":          Buffer;
+  "m": {
+     ut_metadata:  number;
+     ut_pex:       number;
+   };
+  "metadata_size": number;
+  "p":             number;
+  "reqq":          number;
+  "v":             Buffer;
+  "yourip":        Buffer;
 }
 
 inherits(Hose, Duplex);
 
-function Hose(infoHash: string, peerID: string, options?: Options) {
-    // if (!(this instanceof Hose))
-      // return new Hose(infoHash, peerID, options);
-
-    Duplex.call(this)
+function Hose(infoHash: string | Buffer, myID: string | Buffer, options?: Options) {
+    Duplex.call(this);
     const self = this;
 
     self._debugId       = ~~((Math.random() * 100000) + 1);
     self._debug("Begin debugging");
 
-    self.defaultEncoding = 'utf8';
     self.destroyed       = false;
-    self.sentHandshake   = false;
     self.uploadSpeed     = speedometer();
     self.downloadSpeed   = speedometer();
     self.bufferSize      = 0;
@@ -85,13 +92,22 @@ function Hose(infoHash: string, peerID: string, options?: Options) {
     self.pieceHash       = null;
 
     self.infoHash        = infoHash;
-    self.peerID          = peerID;
+    self.myID            = myID;
+    self.peerID          = null;
+    self.peerHasExt      = false;
+    self.peerHasDHT      = false;
     self.choked          = true;
     self.interested      = false;
     self.busy            = false;
     self.reqBusy         = false;
     self.meta            = true;
     self.ext             = {};
+    self.metaHandshake   = null;
+
+    if (options) {
+      if (options.metadata_handshake)
+        self.metaHandshake = options.metadata_handshake;
+    }
 
     self.prepHandshake();
   }
@@ -105,29 +121,36 @@ Hose.prototype.prepHandshake = function () {
     let pstrlen = payload.readUInt8(0);
     self._nextAction(pstrlen + 48, (payload) => {
       // Prepare all information
-      self._debug("prepHandshake Engaged");
-      let pstr          = payload.slice(0, pstrlen),   // Protocol Identifier utf-8 encoding
-          reserved      = payload.slice(pstrlen, 8);   // These 8 bytes are reserved for future use
-          pstr          = pstr.toString();             // Convert the Protocol to a string
-          payload       = payload.slice(pstrlen + 8);  // Remove the pre-string and reserved bytes from buffer
+      self._debug("Recieved Hanshake");
+      let pstr          = payload.slice(0, pstrlen),             // Protocol Identifier utf-8 encoding
+          reserved      = payload.slice(pstrlen, pstrlen + 8);   // These 8 bytes are reserved for future use
+          pstr          = pstr.toString();                       // Convert the Protocol to a string
+          payload       = payload.slice(pstrlen + 8);            // Remove the pre-string and reserved bytes from buffer
       let infoHash      = payload.slice(0, 20),
           peerID        = payload.slice(20, 40);
-          self.infoHash = infoHash.toString("hex");    // Infohash is a hex string
-          self.peerID   = peerID.toString();           // PeerID is also a hex string
+          self.peerID   = peerID.toString();                      // PeerID is also a hex string
 
-      if (pstr !== "BitTorrent protocol")
-        return;
+      if (pstr !== "BitTorrent protocol" || infoHash.toString("hex") !== self.infoHash)
+        self.closeConnection();
+
+      if ( !!(reserved[5] & 0x10) ) {
+        self._debug("peer has extended");
+        self.peerHasExt = true;
+      }
+      if ( !!(reserved[7] & 0x01) ) {
+        self._debug("peer has dht");
+        self.peerHasDHT = true;
+      }
 
       // Send a handshake back if peer initiated the connection
-      self._debug(`infoHash: ${self.infoHash}, peerID: ${self.peerID}`);
-      if (!self.sentHandshake)
-        self.emit("handshake", infoHash, peerID);      // Let listeners know the peers requested infohash and ID
+      self._debug(`infoHash: ${infoHash.toString("hex")}, peerID: ${self.peerID}`);
+      self.emit("handshake", infoHash, peerID);      // Let listeners know the peers requested infohash and ID
 
       // Last but not least let's add a new action to the queue
       self.nextAction();
     });
   });
-}
+};
 
 Hose.prototype.nextAction = function() {
   const self = this;
@@ -135,81 +158,95 @@ Hose.prototype.nextAction = function() {
   self._nextAction(4, (payload) => {
     let length = payload.readUInt32BE(0);          // Get the length of the payload.
     if (length > 0)
-      self._nextAction(length, self.handleCode.bind(self));      // Message length, next action is to parse the information provided
+      self._nextAction(length, self.handleCode);      // Message length, next action is to parse the information provided
     else
       self.nextAction();
   });
-}
+};
 
 /** All built in functionality goes here: **/
 
 // Read streams will all be handled with this.push
-Hose.prototype._read = function() {}
+Hose.prototype._read = function() {};
 /** Handling incoming messages with message length (this.parseSize)
  ** and cueing up commands to handle the message (this.actionStore) **/
 Hose.prototype._write = function(payload: Buffer, encoding: string, next: Function) {
   const self = this;
   self._debug(`incoming size:`, payload.length);
   self.downloadSpeed(payload.length);
-  self.bufferSize += payload.length;             // Increase our buffer size count, we have more data
-  self.streamStore.push(payload);                // Add the payload to our list of streams downloaded
+  self.bufferSize += payload.length;                 // Increase our buffer size count, we have more data
+  self.streamStore.push(payload);                    // Add the payload to our list of streams downloaded
   // Parse Size is always pre-recorded, because we know what to expect from peers
-  while (self.bufferSize >= self.parseSize) {    // Wait until the package size fits the crime
-    let buf = (self.streamStore.length > 1)      // Store our stream to a buffer to do the crime
+  while (self.bufferSize >= self.parseSize) {        // Wait until the package size fits the crime
+    let buf = (self.streamStore.length > 1)          // Store our stream to a buffer to do the crime
       ? Buffer.concat(self.streamStore)
       : self.streamStore[0];
-    self.bufferSize -= self.parseSize;           // Decrease the size of our store count, self number of data is processed
-    self.streamStore = (self.bufferSize)         // If buffersize is zero, reset the buffer; otherwise just slice the part we are going to use
+    self.bufferSize -= self.parseSize;               // Decrease the size of our store count, self number of data is processed
+    self.streamStore = (self.bufferSize)             // If buffersize is zero, reset the buffer; otherwise just slice the part we are going to use
       ? [buf.slice(self.parseSize)]
       : [];
     self.actionStore(buf.slice(0, self.parseSize));  // Let us run the code we have!
   }
   // send a null to let stream know we are done and ready for the next input.
-  // next(null);
-}
+  next(null);
+};
 
 /** ALL OUTGOING GOES HERE:  **/
 
 Hose.prototype._push = function(payload: Buffer) {
   // TODO: upate keep alive timer here.
+  this._debug("sending payload", payload.length);
   return this.push(payload);
-}
+};
 // keep-alive: <len=0000>
 Hose.prototype.sendKeepActive = function() {
+  this._debug("sending keep Alive");
   this._push(KEEP_ALIVE);
-}
+};
 // handshake: <pstrlen><pstr><reserved><info_hash><peer_id>
 Hose.prototype.sendHandshake = function() {
-  // TODO: check if infohash and peerID are already buffers
-  this.sentHandshake = true;
+  this._debug("sending handshake");
   // convert infoHash and peerID to buffer
-  let infoHashBuffer = Buffer.from(this.infoHash, "hex"),
-      peerIDbuffer   = Buffer.from(this.peerID);
+  let infoHashBuffer, peerIDbuffer;
+  (!Buffer.isBuffer(this.infoHash))
+    ? infoHashBuffer = Buffer.from(this.infoHash, "hex")
+    : infoHashBuffer = this.infoHash;
+  (!Buffer.isBuffer(this.myID))
+    ? peerIDbuffer   = Buffer.from(this.myID)
+    : peerIDbuffer   = this.myID;
   this._push(Buffer.concat([PROTOCOL, RESERVED, infoHashBuffer, peerIDbuffer]));
-}
+  this._sendMetaHandshake();
+};
 // not interested: <len=0001><id=3>
 Hose.prototype.sendNotInterested = function() {
+  this._debug("sending not interested");
   this._push(UNINTERESTED);
-}
+};
 // interested: <len=0001><id=2>
 Hose.prototype.sendInterested = function() {
+  this._debug("sending interested");
   this._push(Buffer.concat([INTERESTED, UNCHOKE]));
   this.choked = false;
-}
+};
 // have: <len=0005><id=4><piece index>
 Hose.prototype.sendHave = function(index: number) {
-  // TODO: Superseeding
-}
+  this._debug("send have");
+  let buf = new Buffer(4);
+  buf.writeUInt32BE(index, 0);
+  this._push(Buffer.concat([HAVE, buf]));
+};
 // bitfield: <len=0001+X><id=5><bitfield>
 Hose.prototype.sendBitfield = function(bitfield: string) {
   // update bitfield length param to bitfield size:
+  this._debug("sending bitfield");
   let bitfieldBuf = Buffer.from(bitfield, "hex");
   let bf = BITFIELD;
   bf.writeUInt32BE(bitfieldBuf.length + 1, 0);
   this._push( Buffer.concat([bf, bitfieldBuf]) );
-}
+};
 // request: <len=0013><id=6><index><begin><length>
 Hose.prototype.sendRequest = function(payload: Buffer, count: number) {
+  this._debug("sending request");
   const self      = this;
   // Track how many incoming we are going to get:
   self.blockCount = count;
@@ -217,37 +254,43 @@ Hose.prototype.sendRequest = function(payload: Buffer, count: number) {
   // Create a new hash to ensure authenticity
   self.pieceHash  = createHash("sha1");
   this._push(payload);
-}
+};
 // piece: <len=0009+X><id=7><index><begin><block>
 Hose.prototype.sendPiece = function(piece: Buffer) {
+  this._debug("sending piece");
   this._push(piece);
-}
+};
 // cancel: <len=0013><id=8><index><begin><length>
-Hose.prototype.sendCancel = function() {
-
-}
+Hose.prototype.sendCancel = function(index: number, begin: number, length: number) {
+  this._debug("sending cancel");
+  let buf = new Buffer(12);
+  buf.writeUInt32BE(index, 0);
+  buf.writeUInt32BE(begin, 4);
+  buf.writeUInt32BE(length, 8);
+  this._push( Buffer.concat([CANCEL, buf]) );
+};
 
 /** ALL INCOMING GOES HERE: **/
 
 Hose.prototype._nextAction = function(length: number, action: Function) {
   this.parseSize   = length;
   this.actionStore = action;
-}
+};
 // have: <len=0005><id=4><piece index>
 Hose.prototype._onHave = function(pieceIndex) {
   this.emit("have", pieceIndex);
-}
+};
 // bitfield: <len=0001+X><id=5><bitfield>
 Hose.prototype._onBitfield = function(payload) {
   // Here we have recieved a bitfield (first message)
   this.emit("bitfield", payload);
-}
+};
 // request: <len=0013><id=6><index><begin><length>
 Hose.prototype._onRequest = function(index, begin, length) {
   // Add the request to the stack:
   this.inRequests.push({index, begin, length});
   this.emit("request");
-}
+};
 // piece: <len=0009+X><id=7><index><begin><block>
 Hose.prototype._onPiece = function(index: number, begin: number, block: Buffer) {
   const self = this;
@@ -265,19 +308,27 @@ Hose.prototype._onPiece = function(index: number, begin: number, block: Buffer) 
       self.blocks = [];
     }
   });
-}
+};
 // cancel: <len=0013><id=8><index><begin><length>
 Hose.prototype._onCancel = function(index, begin, length) {
-
-}
+  this.emit("cancel", index, begin, length);
+};
 
 /** ALL EXTENSIONS GO HERE **/
 
-// extension: <len=0002+x><id=20><extID><payload>
+// metaHandshake: <len=0002+X><id=20><ext_id=0><ext_msg>
+Hose.prototype._sendMetaHandshake = function() {
+  if (this.metaHandshake && this.peerHasExt)
+    this.metaDataHandshake(this.metaHandshake);
+  else
+    this.metaDataHandshake();
+};
+// extension: <len=0002+x><id=20><ext_ID><ext_msg>
 Hose.prototype._onExtension = function(extensionID: number, payload: Buffer) {
   const self = this;
   if (extensionID === 0) {
     // Handle the extension handshake:
+    self._debug("extension handshake");
     let obj = bencode.decode(payload);
     let m = obj.m;
     if (m["ut_metadata"]) {
@@ -327,7 +378,7 @@ Hose.prototype._onExtension = function(extensionID: number, payload: Buffer) {
     if (self.meta || extensionID === self.ext["ut_pex"])
       self.ext[extensionID]._message(payload);
   }
-}
+};
 
 // All metadata requests:
 Hose.prototype.metaDataRequest = function() {
@@ -342,20 +393,20 @@ Hose.prototype.metaDataRequest = function() {
     prepRequest.writeUInt32BE(requestEn.length + 2, 0);
     code.writeUInt8(self.ext["ut_metadata"], 0);
     let requestBuf = Buffer.concat([prepRequest, code, requestEn]);
-    console.log("metadata request");
     this._push(requestBuf);
   }
-}
+};
 
-Hose.prototype.metaDataHandshake = function() {
+Hose.prototype.metaDataHandshake = function(msg?) {
   // Prep and send a meta_data handshake:
-  let handshake     = EXT_PROTOCOL,
+  this._debug("sending meta_handshake");
+  let handshake     = (msg) ? msg : EXT_PROTOCOL,
       prepHandshake = EXTENDED,
       handshakeEn   = bencode.encode(handshake);
   prepHandshake.writeUInt32BE(handshakeEn.length + 2, 0);
   let handshakeBuf  = Buffer.concat([prepHandshake, Buffer.from([0x00]), handshakeEn]);
   this._push(handshakeBuf);
-}
+};
 
 /** HANDLE INCOMING MESSAGES HERE: **/
 
@@ -372,9 +423,7 @@ Hose.prototype.handleCode = function(payload: Buffer) {
     case 1:
       // Unchoke
       self._debug("got unchoke");
-      if (!self.choked) {
-
-      } else {
+      if (self.choked) {
         self.choked = false;
         self._push(UNCHOKE);
       }
@@ -383,8 +432,10 @@ Hose.prototype.handleCode = function(payload: Buffer) {
       // Interested
       self._debug("peer is interested");
       self.emit("interested");
-      self.choked = false;
-      self._push(Buffer.concat([INTERESTED, UNCHOKE]));
+      if (self.choked) {
+        self.choked = false;
+        self._push(Buffer.concat([INTERESTED, UNCHOKE]));
+      }
       break;
     case 3:
       // Not Interested
@@ -420,44 +471,46 @@ Hose.prototype.handleCode = function(payload: Buffer) {
     case 20:
       self._debug("Extension Protocol");
       self._onExtension(payload.readUInt8(1), payload.slice(2));
+      break;
     default:
       this._debug("error, wrong message");
   }
-}
+};
 
 /** Commands to & from torrentEngine **/
 
 Hose.prototype.isChoked = function(): Boolean {
   return this.choked;
-}
+};
 
 Hose.prototype.isBusy = function(): Boolean {
   return this.busy;
-}
+};
 
 Hose.prototype.setBusy = function() {
   this.busy = true;
-}
+};
 
 Hose.prototype.unsetBusy = function() {
   this.busy = false;
-}
+};
 
 Hose.prototype.closeConnection = function() {
+  this._debug("CLOSE CONNECTION");
   this.isActive = false;
   this.emit("close");
-}
+};
 
 Hose.prototype.removeMeta = function() {
   this.meta = false;
   this.ext[ UT_METADATA ] = null;
   delete this.ext[ UT_METADATA ];
-}
+};
 
-Hose.prototype.close = function() {
-  // TODO: remove timeouts
-
-}
+Hose.prototype.removePex = function() {
+  this.ext[ UT_PEX ] = null;
+  delete this.ext[ UT_PEX ];
+};
 
 Hose.prototype._debug = function(...args: any[]) {
   args[0] = "[" + this._debugId + "] " + args[0];

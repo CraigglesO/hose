@@ -14,12 +14,12 @@ INFORMATION_GOES_HERE
 ## Install
 
 ``` typescript
-npm install hose
+npm install bittorrent-wire
 ```
 
 ## Usage
 ``` typescript
-import * as x from "hose"
+import Hose from "bittorrent-wire"
 
 EXAMPLE_USAGE_GOES_HERE
 
