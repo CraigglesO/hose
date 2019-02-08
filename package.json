@@ -28,7 +28,7 @@
     "@types/node": "^8.0.0",
     "binary-bitfield": "^3.12.9",
     "blue-tape": "^1.0.0",
-    "nodemon": "^1.11.0",
+    "nodemon": "^1.18.10",
     "onchange": "^3.2.1",
     "tap-spec": "^4.1.1",
     "torrent-piece-handler": "^3.16.41",
